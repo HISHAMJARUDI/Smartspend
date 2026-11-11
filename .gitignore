@@ -1,0 +1,30 @@
+﻿# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+*Terminalkey*
+*terminalkey*
+*.pem
+*.key
+
+# IDE and operating system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Node / Expo (future frontend)
+node_modules/
+.expo/
+dist/
+web-build/
+
+# Local files
+*.log
