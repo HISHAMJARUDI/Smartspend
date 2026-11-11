@@ -1,4 +1,5 @@
-﻿from app.api.admin_students import router as admin_students_router
+﻿from app.api.school_admin_management import router as school_admin_management_router
+from app.api.admin_students import router as admin_students_router
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.terminal_management import router as terminal_management_router
 from app.api.audit import router as audit_router
@@ -171,4 +172,6 @@ app.include_router(audit_router)
 app.include_router(terminal_management_router)
 
 app.include_router(admin_students_router)
+
+app.include_router(school_admin_management_router)
 
