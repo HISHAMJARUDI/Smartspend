@@ -1,3 +1,5 @@
+﻿from app.api.admin_students import router as admin_students_router
+from fastapi.middleware.cors import CORSMiddleware
 from app.api.terminal_management import router as terminal_management_router
 from app.api.audit import router as audit_router
 from app.api.cards import router as cards_router
@@ -27,6 +29,16 @@ app = FastAPI(
     version="1.0.0",
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:8081",
+        "http://127.0.0.1:8081",
+    ],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+)
 @app.middleware("http")
 async def smartspend_rate_limit(request: Request, call_next):
     if not settings.RATE_LIMIT_ENABLED:
@@ -157,3 +169,6 @@ app.include_router(cards_router)
 app.include_router(audit_router)
 
 app.include_router(terminal_management_router)
+
+app.include_router(admin_students_router)
+
