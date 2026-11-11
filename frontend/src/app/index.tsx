@@ -1,0 +1,723 @@
+﻿import React, { useState } from "react";
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TextInput,
+  useWindowDimensions,
+  View,
+} from "react-native";
+
+import { Colors } from "../constants/smartspend-theme";
+import AdminDashboard from "../components/admin-dashboard";
+import ParentDashboard from "../components/parent-dashboard";
+
+const API_BASE_URL =
+  process.env.EXPO_PUBLIC_API_URL || "http://127.0.0.1:8000";
+
+type AuthenticatedUser = {
+  id: number;
+  full_name: string;
+  email: string | null;
+  phone: string | null;
+  role: string;
+  school_id: number | null;
+  is_active: boolean;
+};
+
+const roleDescriptions: Record<string, string> = {
+  parent: "Manage your children's school spending and view transactions.",
+  student: "View your wallet balance and spending history.",
+  canteen: "Access the school canteen payment tools.",
+  school_admin: "Manage your school's SmartSpend operations.",
+  system_admin: "Manage SmartSpend administration and security.",
+};
+
+export default function LoginScreen() {
+  const { width } = useWindowDimensions();
+  const desktop = width >= 850;
+
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] =
+    useState<AuthenticatedUser | null>(null);
+  const [message, setMessage] = useState("");
+
+  async function handleLogin() {
+    if (loading) return;
+
+    if (!email.trim() || !password) {
+      setMessage("Please enter your email and password.");
+      return;
+    }
+
+    setLoading(true);
+    setMessage("");
+
+    try {
+      const formBody =
+        "username=" + encodeURIComponent(email.trim().toLowerCase()) +
+        "&password=" + encodeURIComponent(password);
+
+      const loginResponse = await fetch(`${API_BASE_URL}/auth/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: formBody,
+      });
+
+      if (!loginResponse.ok) {
+        if (loginResponse.status === 401) {
+          throw new Error("Invalid email or password.");
+        }
+        if (loginResponse.status === 403) {
+          throw new Error("This account has been disabled.");
+        }
+        if (loginResponse.status === 429) {
+          throw new Error("Too many attempts. Please try again later.");
+        }
+        if (loginResponse.status === 503) {
+          throw new Error("Authentication is temporarily unavailable.");
+        }
+        throw new Error("Unable to sign in. Please try again.");
+      }
+
+      const tokenData: {
+        access_token: string;
+        token_type: string;
+      } = await loginResponse.json();
+
+      const profileResponse = await fetch(`${API_BASE_URL}/auth/me`, {
+        headers: {
+          Authorization: `Bearer ${tokenData.access_token}`,
+        },
+      });
+
+      if (!profileResponse.ok) {
+        throw new Error("Unable to load your account profile.");
+      }
+
+      const profile: AuthenticatedUser = await profileResponse.json();
+
+      if (!profile.is_active) {
+        throw new Error("This account has been disabled.");
+      }
+
+      setPassword("");
+      setAccessToken(tokenData.access_token);
+      setCurrentUser(profile);
+    } catch (error) {
+      setMessage(
+        error instanceof TypeError
+          ? "Cannot reach SmartSpend. Check the backend connection."
+          : error instanceof Error
+            ? error.message
+            : "An unexpected error occurred."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (
+    currentUser &&
+    accessToken &&
+    ["system_admin", "school_admin"].includes(currentUser.role)
+  ) {
+    return (
+      <AdminDashboard
+        fullName={currentUser.full_name}
+        role={currentUser.role}
+        accessToken={accessToken}
+        onSignOut={() => {
+          setAccessToken(null);
+          setCurrentUser(null);
+          setPassword("");
+          setMessage("");
+        }}
+      />
+    );
+  }
+  if (currentUser?.role === "parent" && accessToken) {
+    return (
+      <ParentDashboard
+        fullName={currentUser.full_name}
+        accessToken={accessToken}
+        onSignOut={() => {
+          setAccessToken(null);
+          setCurrentUser(null);
+          setPassword("");
+          setMessage("");
+        }}
+      />
+    );
+  }
+  if (currentUser) {
+    return (
+      <SafeAreaView style={styles.page}>
+        <View style={[styles.formPanel, { paddingVertical: 40 }]}>
+          <View style={styles.formInner}>
+            <View style={styles.mobileBrand}>
+              <View style={styles.mobileBrandMark}>
+                <Text style={styles.mobileBrandText}>S</Text>
+              </View>
+              <Text style={styles.brandName}>SmartSpend</Text>
+            </View>
+
+            <Text style={styles.welcomeLabel}>
+              AUTHENTICATED
+            </Text>
+
+            <Text style={styles.formTitle}>
+              Welcome, {currentUser.full_name}
+            </Text>
+
+            <Text style={styles.formSubtitle}>
+              {roleDescriptions[currentUser.role] ??
+                "Welcome to your SmartSpend account."}
+            </Text>
+
+            <View style={styles.messageBox}>
+              <Text style={styles.messageText}>
+                Role: {currentUser.role}
+                {"\n"}
+                Account ID: {currentUser.id}
+                {"\n"}
+                School ID: {currentUser.school_id ?? "Not assigned"}
+              </Text>
+            </View>
+
+            <Text style={[styles.helpText, { marginTop: 20 }]}>
+              Authentication is connected. Your full dashboard
+              will be implemented next.
+            </Text>
+
+            <Pressable
+              style={styles.loginButton}
+              onPress={() => {
+                setAccessToken(null);
+                setCurrentUser(null);
+                setPassword("");
+                setMessage("");
+              }}
+              accessibilityRole="button"
+            >
+              <Text style={styles.loginButtonText}>
+                Sign out
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={styles.page}>
+      <StatusBar barStyle="dark-content" />
+
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
+        <ScrollView
+          contentContainerStyle={[
+            styles.scrollContent,
+            desktop && styles.desktopScroll,
+          ]}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View
+            style={[
+              styles.container,
+              desktop && styles.desktopContainer,
+            ]}
+          >
+            {desktop && (
+              <View style={styles.hero}>
+                <View style={styles.brandRow}>
+                  <View style={styles.brandMark}>
+                    <Text style={styles.brandMarkText}>S</Text>
+                  </View>
+                  <Text style={styles.brandNameLight}>
+                    SmartSpend
+                  </Text>
+                </View>
+
+                <View style={styles.heroContent}>
+                  <View style={styles.heroTag}>
+                    <Text style={styles.heroTagText}>
+                      SMARTER SCHOOL PAYMENTS
+                    </Text>
+                  </View>
+
+                  <Text style={styles.heroTitle}>
+                    Every school day,{"\n"}
+                    made simpler.
+                  </Text>
+
+                  <Text style={styles.heroDescription}>
+                    A secure, cashless way for parents,
+                    students and schools to manage
+                    everyday canteen spending.
+                  </Text>
+
+                  <View style={styles.featureCard}>
+                    <View style={styles.featureIcon}>
+                      <Text style={styles.featureIconText}>
+                        ✓
+                      </Text>
+                    </View>
+
+                    <View style={styles.featureContent}>
+                      <Text style={styles.featureTitle}>
+                        Secure by design
+                      </Text>
+                      <Text style={styles.featureDescription}>
+                        Controlled school payments,
+                        clear spending records and
+                        protected student accounts.
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+
+                <Text style={styles.heroFooter}>
+                  SmartSpend · Cashless school spending
+                </Text>
+              </View>
+            )}
+
+            <View style={styles.formPanel}>
+              <View style={styles.formInner}>
+                {!desktop && (
+                  <View style={styles.mobileBrand}>
+                    <View style={styles.mobileBrandMark}>
+                      <Text style={styles.mobileBrandText}>
+                        S
+                      </Text>
+                    </View>
+
+                    <Text style={styles.brandName}>
+                      SmartSpend
+                    </Text>
+                  </View>
+                )}
+
+                <Text style={styles.welcomeLabel}>
+                  WELCOME BACK
+                </Text>
+
+                <Text style={styles.formTitle}>
+                  Sign in to your account
+                </Text>
+
+                <Text style={styles.formSubtitle}>
+                  Access your SmartSpend dashboard
+                  securely and manage your school
+                  payments in one place.
+                </Text>
+
+                <View style={styles.fieldGroup}>
+                  <Text style={styles.fieldLabel}>
+                    Email address
+                  </Text>
+
+                  <TextInput
+                    style={styles.input}
+                    placeholder="you@example.com"
+                    placeholderTextColor="#9AADA6"
+                    value={email}
+                    onChangeText={setEmail}
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    textContentType="username"
+                    autoComplete="email"
+                    accessibilityLabel="Email address"
+                  />
+                </View>
+
+                <View style={styles.fieldGroup}>
+                  <Text style={styles.fieldLabel}>
+                    Password
+                  </Text>
+
+                  <View style={styles.passwordContainer}>
+                    <TextInput
+                      style={styles.passwordInput}
+                      placeholder="Enter your password"
+                      placeholderTextColor="#9AADA6"
+                      value={password}
+                      onChangeText={setPassword}
+                      secureTextEntry={!showPassword}
+                      textContentType="password"
+                      autoComplete="current-password"
+                      accessibilityLabel="Password"
+                    />
+
+                    <Pressable
+                      onPress={() =>
+                        setShowPassword(!showPassword)
+                      }
+                      accessibilityRole="button"
+                      accessibilityLabel={
+                        showPassword
+                          ? "Hide password"
+                          : "Show password"
+                      }
+                    >
+                      <Text style={styles.showText}>
+                        {showPassword ? "Hide" : "Show"}
+                      </Text>
+                    </Pressable>
+                  </View>
+                </View>
+
+                {message !== "" && (
+                  <View style={styles.messageBox}>
+                    <Text style={styles.messageText}>
+                      {message}
+                    </Text>
+                  </View>
+                )}
+
+                <Pressable
+                  onPress={handleLogin}
+                  disabled={loading}
+                  style={({ pressed }) => [
+                    styles.loginButton,
+                    pressed && styles.buttonPressed,
+                  ]}
+                  accessibilityRole="button"
+                >
+                  {loading ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.loginButtonText}>
+                      Sign in
+                    </Text>
+                  )}
+                </Pressable>
+
+                <View style={styles.securityNote}>
+                  <Text style={styles.securityText}>
+                    Your school spending account is
+                    protected by secure authentication.
+                  </Text>
+                </View>
+
+                <View style={styles.separator} />
+
+                <Text style={styles.helpText}>
+                  Need help accessing your account?
+                  Contact your school administrator.
+                </Text>
+
+                <Text style={styles.bottomText}>
+                  © SmartSpend · School payments,
+                  simplified.
+                </Text>
+              </View>
+            </View>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  flex: {
+    flex: 1,
+  },
+  page: {
+    flex: 1,
+    backgroundColor: Colors.background,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    padding: 16,
+  },
+  desktopScroll: {
+    justifyContent: "center",
+    padding: 28,
+  },
+  container: {
+    flex: 1,
+    width: "100%",
+    maxWidth: 1250,
+    alignSelf: "center",
+    backgroundColor: Colors.surface,
+    borderRadius: 24,
+    overflow: "hidden",
+  },
+  desktopContainer: {
+    flexDirection: "row",
+    minHeight: 700,
+    flex: 0,
+  },
+  hero: {
+    flex: 1,
+    backgroundColor: Colors.primary,
+    padding: 42,
+    justifyContent: "space-between",
+  },
+  brandRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  brandMark: {
+    width: 40,
+    height: 40,
+    backgroundColor: Colors.white,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  brandMarkText: {
+    color: Colors.primary,
+    fontWeight: "900",
+    fontSize: 25,
+  },
+  brandNameLight: {
+    fontSize: 23,
+    fontWeight: "800",
+    color: Colors.white,
+    letterSpacing: -0.5,
+  },
+  heroContent: {
+    paddingVertical: 40,
+  },
+  heroTag: {
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(255,255,255,0.12)",
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 30,
+    marginBottom: 28,
+  },
+  heroTagText: {
+    color: "#DDF5E9",
+    fontWeight: "700",
+    fontSize: 10,
+    letterSpacing: 1.4,
+  },
+  heroTitle: {
+    fontSize: 46,
+    lineHeight: 56,
+    fontWeight: "800",
+    color: Colors.white,
+    letterSpacing: -1.5,
+    marginBottom: 22,
+  },
+  heroDescription: {
+    color: "#D2E9DE",
+    fontSize: 16,
+    lineHeight: 27,
+    maxWidth: 380,
+  },
+  featureCard: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    backgroundColor: "rgba(255,255,255,0.10)",
+    padding: 20,
+    borderRadius: 18,
+    marginTop: 45,
+    gap: 14,
+  },
+  featureIcon: {
+    width: 36,
+    height: 36,
+    backgroundColor: "#D9F3E4",
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  featureIconText: {
+    color: Colors.primary,
+    fontWeight: "900",
+    fontSize: 21,
+  },
+  featureContent: {
+    flex: 1,
+  },
+  featureTitle: {
+    color: Colors.white,
+    fontWeight: "700",
+    fontSize: 15,
+    marginBottom: 6,
+  },
+  featureDescription: {
+    color: "#C8E4D6",
+    fontSize: 12,
+    lineHeight: 20,
+  },
+  heroFooter: {
+    fontSize: 12,
+    color: "#B6D7C6",
+  },
+  formPanel: {
+    flex: 1,
+    justifyContent: "center",
+    paddingHorizontal: 24,
+    paddingVertical: 50,
+  },
+  formInner: {
+    width: "100%",
+    maxWidth: 410,
+    alignSelf: "center",
+  },
+  mobileBrand: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 55,
+  },
+  mobileBrandMark: {
+    backgroundColor: Colors.primary,
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  mobileBrandText: {
+    color: Colors.white,
+    fontSize: 25,
+    fontWeight: "900",
+  },
+  brandName: {
+    fontSize: 25,
+    fontWeight: "800",
+    color: Colors.primary,
+  },
+  welcomeLabel: {
+    color: Colors.primary,
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 1.6,
+    marginBottom: 12,
+  },
+  formTitle: {
+    color: Colors.text,
+    fontSize: 29,
+    fontWeight: "800",
+    letterSpacing: -0.8,
+    marginBottom: 13,
+  },
+  formSubtitle: {
+    color: Colors.textSecondary,
+    fontSize: 14,
+    lineHeight: 23,
+    marginBottom: 36,
+  },
+  fieldGroup: {
+    marginBottom: 22,
+  },
+  fieldLabel: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: Colors.text,
+    marginBottom: 10,
+  },
+  input: {
+    height: 54,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: "#FBFDFC",
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    fontSize: 14,
+    color: Colors.text,
+  },
+  passwordContainer: {
+    height: 54,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: "#FBFDFC",
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  passwordInput: {
+    flex: 1,
+    fontSize: 14,
+    color: Colors.text,
+  },
+  showText: {
+    color: Colors.primary,
+    fontWeight: "700",
+    fontSize: 13,
+    paddingLeft: 12,
+  },
+  messageBox: {
+    padding: 13,
+    backgroundColor: Colors.primaryLight,
+    borderRadius: 10,
+    marginBottom: 16,
+  },
+  messageText: {
+    color: Colors.primary,
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  loginButton: {
+    height: 54,
+    backgroundColor: Colors.primary,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 8,
+  },
+  buttonPressed: {
+    opacity: 0.85,
+  },
+  loginButtonText: {
+    color: Colors.white,
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  securityNote: {
+    paddingTop: 22,
+    alignItems: "center",
+  },
+  securityText: {
+    color: Colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 19,
+    textAlign: "center",
+  },
+  separator: {
+    height: 1,
+    backgroundColor: Colors.border,
+    marginVertical: 32,
+  },
+  helpText: {
+    color: Colors.textSecondary,
+    fontSize: 13,
+    textAlign: "center",
+    lineHeight: 21,
+  },
+  bottomText: {
+    marginTop: 55,
+    color: "#9AADA6",
+    fontSize: 11,
+    textAlign: "center",
+  },
+});
+
+
+

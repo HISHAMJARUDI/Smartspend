@@ -1,0 +1,438 @@
+﻿import React, { useCallback, useEffect, useState } from "react";
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from "react-native";
+import { Colors } from "../constants/smartspend-theme";
+
+type Child = {
+  student_id: number;
+  full_name: string;
+  student_number: string;
+  class_name: string | null;
+  school_id: number;
+  wallet_id: number;
+  balance: number;
+  currency: string;
+};
+
+type Props = {
+  fullName: string;
+  accessToken: string;
+  onSignOut: () => void;
+};
+
+const API_URL =
+  process.env.EXPO_PUBLIC_API_URL || "http://127.0.0.1:8000";
+
+function money(amount: number, currency: string) {
+  return `${currency} ${amount.toLocaleString("en-UG")}`;
+}
+
+export default function ParentDashboard({
+  fullName,
+  accessToken,
+  onSignOut,
+}: Props) {
+  const { width } = useWindowDimensions();
+  const wide = width >= 760;
+
+  const [children, setChildren] = useState<Child[]>([]);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [transactions, setTransactions] = useState<unknown[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [transactionsLoading, setTransactionsLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [transactionError, setTransactionError] = useState("");
+
+  const loadChildren = useCallback(async () => {
+    setLoading(true);
+    setError("");
+
+    try {
+      const response = await fetch(`${API_URL}/parents/me/children`, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(
+          response.status === 401
+            ? "Your session is no longer valid. Please sign in again."
+            : response.status === 403
+              ? "This account does not have parent access."
+              : "Unable to load your children's information."
+        );
+      }
+
+      const data: Child[] = await response.json();
+      setChildren(data);
+      setSelectedId((previous) =>
+        data.some((child) => child.student_id === previous)
+          ? previous
+          : data[0]?.student_id ?? null
+      );
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "An unexpected error occurred."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [accessToken]);
+
+  useEffect(() => {
+    void loadChildren();
+  }, [loadChildren]);
+
+  useEffect(() => {
+    if (selectedId === null) {
+      setTransactions([]);
+      setTransactionError("");
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadTransactions() {
+      setTransactions([]);
+      setTransactionsLoading(true);
+      setTransactionError("");
+
+      try {
+        const response = await fetch(
+          `${API_URL}/parents/me/children/${selectedId}/transactions`,
+          { headers: { Authorization: `Bearer ${accessToken}` } }
+        );
+
+        if (!response.ok) {
+          throw new Error("Unable to load transactions for this child.");
+        }
+
+        const data: unknown = await response.json();
+
+        if (!Array.isArray(data)) {
+          throw new Error("Unexpected transaction response.");
+        }
+
+        if (!cancelled) setTransactions(data);
+      } catch (err) {
+        if (!cancelled) {
+          setTransactionError(
+            err instanceof Error ? err.message : "Transaction loading failed."
+          );
+        }
+      } finally {
+        if (!cancelled) setTransactionsLoading(false);
+      }
+    }
+
+    void loadTransactions();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedId, accessToken]);
+
+  const selectedChild =
+    children.find((child) => child.student_id === selectedId) ?? null;
+
+  const currencyGroups = children.reduce<Record<string, number>>(
+    (totals, child) => {
+      totals[child.currency] =
+        (totals[child.currency] ?? 0) + child.balance;
+      return totals;
+    },
+    {}
+  );
+
+  return (
+    <ScrollView
+      style={styles.page}
+      contentContainerStyle={styles.content}
+    >
+      <View style={[styles.header, wide && styles.headerWide]}>
+        <View>
+          <Text style={styles.brand}>SmartSpend</Text>
+          <Text style={styles.subtitle}>PARENT PORTAL</Text>
+        </View>
+        <Pressable
+          onPress={onSignOut}
+          style={styles.signOut}
+          accessibilityRole="button"
+        >
+          <Text style={styles.signOutText}>Sign out</Text>
+        </Pressable>
+      </View>
+
+      <View style={styles.main}>
+        <Text style={styles.eyebrow}>YOUR DASHBOARD</Text>
+        <Text style={styles.heading}>Welcome, {fullName}</Text>
+        <Text style={styles.description}>
+          Your children's balances and school spending, all in one place.
+        </Text>
+
+        {error ? (
+          <View style={styles.errorCard}>
+            <Text style={styles.errorText}>{error}</Text>
+            <Pressable onPress={() => void loadChildren()}>
+              <Text style={styles.retry}>Try again</Text>
+            </Pressable>
+          </View>
+        ) : null}
+
+        {loading ? (
+          <ActivityIndicator
+            size="large"
+            color={Colors.primary}
+            style={styles.loader}
+          />
+        ) : (
+          <>
+            <View style={[styles.stats, wide && styles.statsWide]}>
+              <View style={[styles.balanceCard, wide && styles.statWide]}>
+                <Text style={styles.balanceLabel}>Combined wallet balance</Text>
+                {Object.entries(currencyGroups).length === 0 ? (
+                  <Text style={styles.balanceValue}>No wallets linked</Text>
+                ) : (
+                  Object.entries(currencyGroups).map(([currency, amount]) => (
+                    <Text key={currency} style={styles.balanceValue}>
+                      {money(amount, currency)}
+                    </Text>
+                  ))
+                )}
+                <Text style={styles.balanceFoot}>
+                  Based on currently linked student wallets
+                </Text>
+              </View>
+
+              <View style={[styles.statCard, wide && styles.statWide]}>
+                <Text style={styles.statLabel}>Linked children</Text>
+                <Text style={styles.statValue}>{children.length}</Text>
+                <Text style={styles.statFoot}>Student accounts</Text>
+              </View>
+            </View>
+
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Your children</Text>
+              <Pressable onPress={() => void loadChildren()}>
+                <Text style={styles.refresh}>Refresh</Text>
+              </Pressable>
+            </View>
+
+            {children.length === 0 ? (
+              <View style={styles.emptyCard}>
+                <Text style={styles.emptyTitle}>No linked children yet</Text>
+                <Text style={styles.muted}>
+                  Contact your school administrator to link student accounts.
+                </Text>
+              </View>
+            ) : (
+              <View style={[styles.childGrid, wide && styles.childGridWide]}>
+                {children.map((child) => {
+                  const selected = child.student_id === selectedId;
+                  return (
+                    <Pressable
+                      key={child.student_id}
+                      onPress={() => setSelectedId(child.student_id)}
+                      style={[
+                        styles.childCard,
+                        wide && styles.childCardWide,
+                        selected && styles.selectedCard,
+                      ]}
+                      accessibilityRole="button"
+                    >
+                      <View style={styles.avatar}>
+                        <Text style={styles.avatarText}>
+                          {child.full_name.charAt(0).toUpperCase()}
+                        </Text>
+                      </View>
+                      <Text style={styles.childName}>{child.full_name}</Text>
+                      <Text style={styles.muted}>
+                        Student #{child.student_number}
+                      </Text>
+                      <Text style={styles.muted}>
+                        {child.class_name ?? "Class not assigned"}
+                      </Text>
+                      <View style={styles.cardDivider} />
+                      <Text style={styles.statLabel}>Wallet balance</Text>
+                      <Text style={styles.childBalance}>
+                        {money(child.balance, child.currency)}
+                      </Text>
+                      <Text style={styles.viewLink}>
+                        {selected ? "Selected account" : "View spending"}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
+
+            {selectedChild && (
+              <View style={styles.activityCard}>
+                <Text style={styles.sectionTitle}>Recent activity</Text>
+                <Text style={styles.muted}>
+                  {selectedChild.full_name}
+                </Text>
+                {transactionsLoading ? (
+                  <ActivityIndicator
+                    color={Colors.primary}
+                    style={styles.loader}
+                  />
+                ) : transactionError ? (
+                  <Text style={styles.errorText}>{transactionError}</Text>
+                ) : (
+                  <>
+                    <Text style={styles.activityCount}>
+                      {transactions.length}
+                    </Text>
+                    <Text style={styles.muted}>
+                      Transactions returned by SmartSpend
+                    </Text>
+                    <Text style={styles.activityNote}>
+                      Detailed transaction rows will be added using
+                      the backend's exact transaction schema.
+                    </Text>
+                  </>
+                )}
+              </View>
+            )}
+          </>
+        )}
+      </View>
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  page: { flex: 1, backgroundColor: "#F7FAF8" },
+  content: { flexGrow: 1, paddingBottom: 60 },
+  header: {
+    padding: 22, backgroundColor: "#FFFFFF",
+    borderBottomWidth: 1, borderBottomColor: "#DFEAE4",
+    flexDirection: "row", alignItems: "center",
+    justifyContent: "space-between",
+  },
+  headerWide: { paddingHorizontal: 48 },
+  brand: { color: "#14664D", fontSize: 24, fontWeight: "800" },
+  subtitle: {
+    color: "#647A76", fontSize: 10,
+    fontWeight: "800", letterSpacing: 1.5, marginTop: 3,
+  },
+  signOut: {
+    paddingVertical: 10, paddingHorizontal: 17,
+    borderRadius: 10, backgroundColor: "#EDF5F0",
+  },
+  signOutText: { color: "#14664D", fontWeight: "700" },
+  main: {
+    width: "100%", maxWidth: 1150,
+    alignSelf: "center", padding: 20, paddingTop: 36,
+  },
+  eyebrow: {
+    color: "#14664D", fontSize: 11,
+    fontWeight: "800", letterSpacing: 1.7,
+  },
+  heading: {
+    color: "#173445", fontSize: 30,
+    fontWeight: "800", marginTop: 10,
+  },
+  description: {
+    color: "#647A76", fontSize: 14, marginTop: 8,
+    lineHeight: 22, marginBottom: 30,
+  },
+  stats: { gap: 16 },
+  statsWide: { flexDirection: "row" },
+  statWide: { flex: 1 },
+  balanceCard: {
+    backgroundColor: "#14664D",
+    borderRadius: 18, padding: 26, minHeight: 170,
+  },
+  balanceLabel: { color: "#D9EFE4", fontSize: 13 },
+  balanceValue: {
+    color: "#FFFFFF", fontWeight: "800",
+    fontSize: 28, marginTop: 18,
+  },
+  balanceFoot: { color: "#C9E4D7", fontSize: 11, marginTop: 16 },
+  statCard: {
+    backgroundColor: "#FFFFFF", borderRadius: 18,
+    padding: 26, minHeight: 170,
+    borderWidth: 1, borderColor: "#DFEAE4",
+  },
+  statLabel: { color: "#647A76", fontSize: 12 },
+  statValue: {
+    color: "#173445", fontSize: 38,
+    fontWeight: "800", marginTop: 14,
+  },
+  statFoot: { color: "#647A76", fontSize: 12, marginTop: 12 },
+  sectionHeader: {
+    marginTop: 35, marginBottom: 16,
+    flexDirection: "row", alignItems: "center",
+    justifyContent: "space-between",
+  },
+  sectionTitle: { color: "#173445", fontSize: 20, fontWeight: "800" },
+  refresh: { color: "#14664D", fontWeight: "700" },
+  childGrid: { gap: 16 },
+  childGridWide: { flexDirection: "row", flexWrap: "wrap" },
+  childCard: {
+    backgroundColor: "#FFFFFF", borderRadius: 18,
+    padding: 22, borderWidth: 1, borderColor: "#DFEAE4",
+  },
+  childCardWide: { width: "48%" },
+  selectedCard: { borderColor: "#14664D", borderWidth: 2 },
+  avatar: {
+    width: 44, height: 44, borderRadius: 14,
+    backgroundColor: "#EDF5F0",
+    alignItems: "center", justifyContent: "center",
+    marginBottom: 14,
+  },
+  avatarText: { color: "#14664D", fontSize: 20, fontWeight: "800" },
+  childName: {
+    color: "#173445", fontSize: 17,
+    fontWeight: "800", marginBottom: 6,
+  },
+  muted: { color: "#647A76", fontSize: 13, lineHeight: 21 },
+  cardDivider: {
+    height: 1, backgroundColor: "#DFEAE4", marginVertical: 18,
+  },
+  childBalance: {
+    color: "#14664D", fontSize: 23,
+    fontWeight: "800", marginTop: 6,
+  },
+  viewLink: {
+    color: "#267D60", fontSize: 12,
+    fontWeight: "700", marginTop: 18,
+  },
+  activityCard: {
+    backgroundColor: "#FFFFFF", borderRadius: 18,
+    borderWidth: 1, borderColor: "#DFEAE4",
+    padding: 24, marginTop: 30,
+  },
+  activityCount: {
+    fontSize: 32, fontWeight: "800",
+    color: "#14664D", marginTop: 20,
+  },
+  activityNote: {
+    color: "#647A76", fontSize: 12,
+    lineHeight: 20, marginTop: 18,
+  },
+  emptyCard: {
+    padding: 25, backgroundColor: "#FFFFFF",
+    borderRadius: 18, borderWidth: 1, borderColor: "#DFEAE4",
+  },
+  emptyTitle: {
+    color: "#173445", fontWeight: "800",
+    fontSize: 16, marginBottom: 7,
+  },
+  errorCard: {
+    backgroundColor: "#FFF0EE", padding: 18,
+    borderRadius: 12, marginBottom: 18,
+  },
+  errorText: { color: "#AA372F", fontSize: 13 },
+  retry: { color: "#14664D", fontWeight: "800", marginTop: 10 },
+  loader: { marginVertical: 35 },
+});
