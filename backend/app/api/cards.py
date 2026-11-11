@@ -24,7 +24,20 @@ router = APIRouter(
     tags=["Card Management"],
 )
 
-admin_only = require_roles("system_admin")
+admin_only = require_roles("school_admin", "system_admin")
+
+
+def authorized_school_id(admin: User) -> int | None:
+    if admin.role == "system_admin":
+        return None
+
+    if admin.school_id is None:
+        raise HTTPException(
+            status_code=403,
+            detail="Administrator has no assigned school",
+        )
+
+    return admin.school_id
 
 
 def handle_error(error: Exception):
@@ -54,7 +67,12 @@ def issue_student_card(
 ):
     try:
         with SessionLocal() as db:
-            card = issue_card(db, payload.student_id, actor_id=admin.id)
+            card = issue_card(
+                db,
+                payload.student_id,
+                actor_id=admin.id,
+                allowed_school_id=authorized_school_id(admin),
+            )
 
             return {
                 "message": "Card issued successfully",
@@ -75,7 +93,11 @@ def get_student_cards(
     db: Session = Depends(get_db),
 ):
     try:
-        return list_student_cards(db, student_id)
+        return list_student_cards(
+            db,
+            student_id,
+            allowed_school_id=authorized_school_id(admin),
+        )
 
     except CardNotFound as error:
         handle_error(error)
@@ -91,7 +113,12 @@ def block_student_card(
 ):
     try:
         with SessionLocal() as db:
-            card = block_card(db, card_id, actor_id=admin.id)
+            card = block_card(
+                db,
+                card_id,
+                actor_id=admin.id,
+                allowed_school_id=authorized_school_id(admin),
+            )
 
             return {
                 "message": "Card blocked successfully",
@@ -113,7 +140,12 @@ def replace_student_card(
 ):
     try:
         with SessionLocal() as db:
-            card = replace_card(db, card_id, actor_id=admin.id)
+            card = replace_card(
+                db,
+                card_id,
+                actor_id=admin.id,
+                allowed_school_id=authorized_school_id(admin),
+            )
 
             return {
                 "message": "Replacement card issued",

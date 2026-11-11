@@ -27,7 +27,11 @@ def make_demo_card_hash() -> str:
     return hashlib.sha256(token).hexdigest()
 
 
-def lock_student(db: Session, student_id: int) -> Student:
+def lock_student(
+    db: Session,
+    student_id: int,
+    allowed_school_id: int | None = None,
+) -> Student:
     student = db.scalar(
         select(Student)
         .where(Student.id == student_id)
@@ -39,6 +43,12 @@ def lock_student(db: Session, student_id: int) -> Student:
 
     if not student.is_active:
         raise CardConflict("Student account is inactive")
+
+    if (
+        allowed_school_id is not None
+        and student.school_id != allowed_school_id
+    ):
+        raise CardNotFound("Student not found")
 
     return student
 
@@ -56,9 +66,12 @@ def issue_card(
     db: Session,
     student_id: int,
     actor_id: int | None = None,
+    allowed_school_id: int | None = None,
 ):
     with db.begin():
-        student = lock_student(db, student_id)
+        student = lock_student(
+            db, student_id, allowed_school_id
+        )
 
         if find_active_card(db, student_id):
             raise CardConflict(
@@ -91,10 +104,20 @@ def issue_card(
     return db.get(Card, card_id)
 
 
-def list_student_cards(db: Session, student_id: int):
+def list_student_cards(
+    db: Session,
+    student_id: int,
+    allowed_school_id: int | None = None,
+):
     student = db.get(Student, student_id)
 
     if student is None:
+        raise CardNotFound("Student not found")
+
+    if (
+        allowed_school_id is not None
+        and student.school_id != allowed_school_id
+    ):
         raise CardNotFound("Student not found")
 
     return db.scalars(
@@ -108,6 +131,7 @@ def block_card(
     db: Session,
     card_id: int,
     actor_id: int | None = None,
+    allowed_school_id: int | None = None,
 ):
     # Read only to identify the student. The record is
     # rechecked after obtaining the student row lock.
@@ -121,7 +145,9 @@ def block_card(
     db.rollback()
 
     with db.begin():
-        student = lock_student(db, student_id)
+        student = lock_student(
+            db, student_id, allowed_school_id
+        )
 
         card = db.scalar(
             select(Card)
@@ -157,6 +183,7 @@ def replace_card(
     db: Session,
     card_id: int,
     actor_id: int | None = None,
+    allowed_school_id: int | None = None,
 ):
     initial = db.get(Card, card_id)
 
@@ -168,7 +195,9 @@ def replace_card(
     db.rollback()
 
     with db.begin():
-        student = lock_student(db, student_id)
+        student = lock_student(
+            db, student_id, allowed_school_id
+        )
 
         old_card = db.scalar(
             select(Card)

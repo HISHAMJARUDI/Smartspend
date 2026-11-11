@@ -1,4 +1,4 @@
-﻿import secrets
+import secrets
 
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
@@ -21,7 +21,19 @@ class StudentConflict(Exception):
     pass
 
 
-def create_student(db: Session, payload: StudentCreate):
+def create_student(
+    db: Session,
+    payload: StudentCreate,
+    allowed_school_id: int | None = None,
+):
+    if (
+        allowed_school_id is not None
+        and payload.school_id != allowed_school_id
+    ):
+        raise StudentValidationError(
+            "Student enrollment is outside the authorized school"
+        )
+
     school = db.get(School, payload.school_id)
 
     if school is None or not school.is_active:

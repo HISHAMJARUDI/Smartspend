@@ -1,4 +1,4 @@
-﻿from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -20,7 +20,7 @@ router = APIRouter(
     tags=["Students"],
 )
 
-system_admin_only = require_roles("system_admin")
+admin_only = require_roles("school_admin", "system_admin")
 
 
 @router.post(
@@ -31,10 +31,30 @@ system_admin_only = require_roles("system_admin")
 def register_student(
     payload: StudentCreate,
     db: Session = Depends(get_db),
-    admin: User = Depends(system_admin_only),
+    admin: User = Depends(admin_only),
 ):
     try:
-        return create_student(db, payload)
+        if admin.role == "school_admin":
+            if admin.school_id is None:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Administrator has no assigned school",
+                )
+            if payload.school_id != admin.school_id:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Cannot register students in another school",
+                )
+
+        return create_student(
+            db,
+            payload,
+            allowed_school_id=(
+                admin.school_id
+                if admin.role == "school_admin"
+                else None
+            ),
+        )
 
     except StudentValidationError as error:
         raise HTTPException(
